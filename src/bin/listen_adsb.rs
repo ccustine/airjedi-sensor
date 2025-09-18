@@ -1,10 +1,10 @@
-use adsb_demod::DEMOD_SAMPLE_RATE;
-use adsb_demod::{OutputModuleConfig, OutputModuleManager};
-use adsb_demod::{BeastOutput, AvrOutput, RawOutput, Sbs1Output, WebSocketOutput};
-use adsb_demod::Decoder;
-use adsb_demod::Demodulator;
-use adsb_demod::PreambleDetector;
-use adsb_demod::Tracker;
+use airjedi::DEMOD_SAMPLE_RATE;
+use airjedi::{OutputModuleConfig, OutputModuleManager};
+use airjedi::{BeastOutput, AvrOutput, RawOutput, Sbs1Output, WebSocketOutput};
+use airjedi::Decoder;
+use airjedi::Demodulator;
+use airjedi::PreambleDetector;
+use airjedi::Tracker;
 use anyhow::Result;
 use clap::Parser;
 use clap::command;

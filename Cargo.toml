@@ -1,10 +1,10 @@
 [package]
-name = "adsb_demod"
+name = "airjedi"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "High-performance ADS-B decoder in Rust using FutureSDR framework with real-time web interface"
-repository = "https://github.com/ccustine/aviaware"
+repository = "https://github.com/ccustine/airjedi"
 keywords = ["adsb", "sdr", "aviation", "futuresdr", "decoder"]
 categories = ["command-line-utilities", "science", "web-programming"]
 authors = ["ccustine"]
@@ -12,7 +12,7 @@ authors = ["ccustine"]
 [workspace]
 
 [[bin]]
-name = "aviaware"
+name = "airjedi"
 path = "src/bin/listen_adsb.rs"
 
 [features]

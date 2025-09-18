@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AviAware is an ADS-B (Automatic Dependent Surveillance–Broadcast) decoder written in Rust using the FutureSDR framework. It receives radio signals from aircraft transponders at 1090 MHz, demodulates and decodes the ADS-B messages, and displays aircraft positions on a web-based map interface.
+AirJedi is an ADS-B (Automatic Dependent Surveillance–Broadcast) decoder written in Rust using the FutureSDR framework. It receives radio signals from aircraft transponders at 1090 MHz, demodulates and decodes the ADS-B messages, and displays aircraft positions on a web-based map interface.
 
 ## Build and Run Commands
 
@@ -80,7 +80,7 @@ Input files should be Complex32 format at any sample rate ≥ 2 MHz.
 
 ## Output Formats
 
-AviAware supports multiple output formats for compatibility with various ADS-B tools and applications:
+AirJedi supports multiple output formats for compatibility with various ADS-B tools and applications:
 
 ### BEAST Format (Port 30005)
 - **Default**: Enabled by default
@@ -146,7 +146,7 @@ cargo run -- --sbs1 --websocket
 For web applications connecting to the WebSocket output:
 
 ```javascript
-// Connect to AviAware WebSocket server
+// Connect to AirJedi WebSocket server
 const ws = new WebSocket('ws://localhost:8080');
 
 // Handle binary BEAST messages
@@ -170,7 +170,7 @@ ws.onmessage = function(event) {
 };
 
 ws.onopen = function() {
-    console.log('Connected to AviAware WebSocket stream');
+    console.log('Connected to AirJedi WebSocket stream');
 };
 
 ws.onerror = function(error) {

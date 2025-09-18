@@ -1,6 +1,6 @@
-# AviAware 🛩️
+# AirJedi 🛩️
 
-A high-performance ADS-B (Automatic Dependent Surveillance–Broadcast) decoder written in Rust using the FutureSDR framework. AviAware receives 1090 MHz radio signals from aircraft transponders, demodulates and decodes ADS-B messages in real-time, and displays aircraft positions on an interactive web-based map.
+A high-performance ADS-B (Automatic Dependent Surveillance–Broadcast) decoder written in Rust using the FutureSDR framework. AirJedi receives 1090 MHz radio signals from aircraft transponders, demodulates and decodes ADS-B messages in real-time, and displays aircraft positions on an interactive web-based map.
 
 ## ✨ Features
 
@@ -231,7 +231,7 @@ cargo test
 This project is licensed under the [Apache License 2.0](LICENSE).
 
 ```
-Copyright 2025 AviAware Contributors
+Copyright 2025 AirJedi Contributors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
