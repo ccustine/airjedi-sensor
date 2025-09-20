@@ -1,5 +1,5 @@
 use airjedi::DEMOD_SAMPLE_RATE;
-use airjedi::{OutputModuleConfig, OutputModuleManager};
+use airjedi::OutputModuleManager;
 use airjedi::{BeastOutput, AvrOutput, RawOutput, Sbs1Output, WebSocketOutput};
 use airjedi::Decoder;
 use airjedi::Demodulator;
@@ -44,6 +44,8 @@ struct Args {
     /// Remove aircrafts when no packets have been received for the specified number of seconds
     #[arg(short, long)]
     lifetime: Option<u64>,
+
+    // Output module arguments
     /// Enable BEAST mode output (dump1090 compatible)
     #[arg(long, default_value_t = true)]
     beast: bool,
@@ -53,12 +55,14 @@ struct Args {
     /// Port for BEAST mode output
     #[arg(long, default_value_t = 30005)]
     beast_port: u16,
+
     /// Enable AVR format output (dump1090 compatible with timestamps)
     #[arg(long)]
     avr: bool,
     /// Port for AVR format output
     #[arg(long, default_value_t = 30003)]
     avr_port: u16,
+
     /// Enable raw format output (dump1090 port 30002 compatible)
     #[arg(long, default_value_t = true)]
     raw: bool,
@@ -68,12 +72,14 @@ struct Args {
     /// Port for raw format output
     #[arg(long, default_value_t = 30002)]
     raw_port: u16,
+
     /// Enable SBS-1/BaseStation format output (port 30004 compatible)
     #[arg(long)]
     sbs1: bool,
     /// Port for SBS-1/BaseStation format output
     #[arg(long, default_value_t = 30004)]
     sbs1_port: u16,
+
     /// Enable WebSocket output for real-time web application streaming
     #[arg(long)]
     websocket: bool,
@@ -168,70 +174,52 @@ async fn main() -> Result<()> {
     // Set up dynamic output module system
     let mut output_manager = OutputModuleManager::new();
 
-    // Start enabled output modules
-    if args.beast && !args.no_beast {
-        let config = OutputModuleConfig::new("beast", args.beast_port).with_buffer_capacity(1024);
-        match BeastOutput::new(config).await {
-            Ok(module) => {
-                println!("BEAST mode server started on port {}", args.beast_port);
-                output_manager.add_module(Box::new(module));
+    // Register all output modules
+    airjedi::register_output_modules! {
+        manager: output_manager,
+        args: args,
+        modules: [
+            beast: {
+                type: BeastOutput,
+                enabled_check: args.beast && !args.no_beast,
+                port_field: args.beast_port,
+                name: "beast",
+                success_msg: "BEAST mode server started on port {}",
+                error_msg: "Failed to start BEAST server"
+            },
+            avr: {
+                type: AvrOutput,
+                enabled_check: args.avr,
+                port_field: args.avr_port,
+                name: "avr",
+                success_msg: "AVR format server started on port {}",
+                error_msg: "Failed to start AVR server"
+            },
+            raw: {
+                type: RawOutput,
+                enabled_check: args.raw && !args.no_raw,
+                port_field: args.raw_port,
+                name: "raw",
+                success_msg: "Raw format server started on port {}",
+                error_msg: "Failed to start raw server"
+            },
+            sbs1: {
+                type: Sbs1Output,
+                enabled_check: args.sbs1,
+                port_field: args.sbs1_port,
+                name: "sbs1",
+                success_msg: "SBS-1/BaseStation format server started on port {}",
+                error_msg: "Failed to start SBS-1 server"
+            },
+            websocket: {
+                type: WebSocketOutput,
+                enabled_check: args.websocket,
+                port_field: args.websocket_port,
+                name: "websocket",
+                success_msg: "WebSocket server started on port {} (BEAST format)",
+                error_msg: "Failed to start WebSocket server"
             }
-            Err(e) => {
-                eprintln!("Failed to start BEAST server: {}", e);
-            }
-        }
-    }
-
-    if args.avr {
-        let config = OutputModuleConfig::new("avr", args.avr_port).with_buffer_capacity(1024);
-        match AvrOutput::new(config).await {
-            Ok(module) => {
-                println!("AVR format server started on port {}", args.avr_port);
-                output_manager.add_module(Box::new(module));
-            }
-            Err(e) => {
-                eprintln!("Failed to start AVR server: {}", e);
-            }
-        }
-    }
-
-    if args.raw && !args.no_raw {
-        let config = OutputModuleConfig::new("raw", args.raw_port).with_buffer_capacity(1024);
-        match RawOutput::new(config).await {
-            Ok(module) => {
-                println!("Raw format server started on port {}", args.raw_port);
-                output_manager.add_module(Box::new(module));
-            }
-            Err(e) => {
-                eprintln!("Failed to start raw server: {}", e);
-            }
-        }
-    }
-
-    if args.sbs1 {
-        let config = OutputModuleConfig::new("sbs1", args.sbs1_port).with_buffer_capacity(1024);
-        match Sbs1Output::new(config).await {
-            Ok(module) => {
-                println!("SBS-1/BaseStation format server started on port {}", args.sbs1_port);
-                output_manager.add_module(Box::new(module));
-            }
-            Err(e) => {
-                eprintln!("Failed to start SBS-1 server: {}", e);
-            }
-        }
-    }
-
-    if args.websocket {
-        let config = OutputModuleConfig::new("websocket", args.websocket_port).with_buffer_capacity(1024);
-        match WebSocketOutput::new(config).await {
-            Ok(module) => {
-                println!("WebSocket server started on port {} (BEAST format)", args.websocket_port);
-                output_manager.add_module(Box::new(module));
-            }
-            Err(e) => {
-                eprintln!("Failed to start WebSocket server: {}", e);
-            }
-        }
+        ]
     }
 
     // Create tracker with dynamic output module system

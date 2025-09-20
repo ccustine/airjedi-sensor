@@ -29,22 +29,26 @@ mod tracker;
 pub use tracker::Tracker;
 
 mod beast_output;
-pub use beast_output::{BeastBroadcaster, BeastMessage, BeastServer, BeastOutput, BeastOutputBuilder};
+pub use beast_output::{BeastBroadcaster, BeastMessage, BeastServer, BeastOutput};
 
 mod avr_output;
-pub use avr_output::{AvrBroadcaster, AvrMessage, AvrServer, AvrOutput, AvrOutputBuilder};
+pub use avr_output::{AvrBroadcaster, AvrMessage, AvrServer, AvrOutput};
 
 mod raw_output;
-pub use raw_output::{RawBroadcaster, RawMessage, RawServer, RawOutput, RawOutputBuilder};
+pub use raw_output::{RawBroadcaster, RawMessage, RawServer, RawOutput};
 
 mod sbs1_output;
-pub use sbs1_output::{Sbs1Broadcaster, Sbs1Message, Sbs1Server, Sbs1Output, Sbs1OutputBuilder};
+pub use sbs1_output::{Sbs1Broadcaster, Sbs1Message, Sbs1Server, Sbs1Output};
 
 mod websocket_output;
-pub use websocket_output::{WebSocketBroadcaster, WebSocketMessage, WebSocketServer, WebSocketOutput, WebSocketOutputBuilder};
+pub use websocket_output::{WebSocketBroadcaster, WebSocketMessage, WebSocketServer, WebSocketOutput};
 
 mod output_module;
 pub use output_module::{OutputModule, OutputModuleBuilder, OutputModuleConfig, OutputModuleManager, OutputModuleRegistry};
+
+// Macros for reducing output module boilerplate
+#[macro_use]
+pub mod macros;
 
 type AdsbIcao = adsb_deku::ICAO;
 type AdsbIdentification = adsb_deku::adsb::Identification;

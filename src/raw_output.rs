@@ -197,34 +197,7 @@ impl crate::output_module::OutputModule for RawOutput {
     }
 }
 
-/// Builder for Raw output modules
-pub struct RawOutputBuilder;
-
-impl RawOutputBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::output_module::OutputModuleBuilder for RawOutputBuilder {
-    fn module_type(&self) -> &str {
-        "raw"
-    }
-
-    fn description(&self) -> &str {
-        "Raw hex format for dump1090 port 30002 compatibility"
-    }
-
-    fn default_port(&self) -> u16 {
-        30002
-    }
-
-    async fn build(&self, config: crate::output_module::OutputModuleConfig) -> Result<Box<dyn crate::output_module::OutputModule>> {
-        let module = RawOutput::new(config).await?;
-        Ok(Box::new(module))
-    }
-}
+// Builder implementation removed - using direct instantiation in main
 
 #[cfg(test)]
 mod tests {

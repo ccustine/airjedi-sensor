@@ -139,12 +139,10 @@ impl OutputModuleRegistry {
 
     /// Create a registry with all built-in module types registered
     pub fn with_builtin_modules() -> Self {
-        let registry = Self::new();
-        
         // Note: Built-in module registration will be handled by the application
         // when the builders are available. This is left as a placeholder.
-        
-        registry
+
+        Self::new()
     }
 }
 

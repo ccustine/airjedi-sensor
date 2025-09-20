@@ -47,7 +47,7 @@ impl BeastMessage {
             .as_micros() as u64;
 
         // Convert correlation strength to signal strength (0-255)
-        let signal_strength = (metadata.preamble_correlation.min(255.0).max(0.0)) as u8;
+        let signal_strength = metadata.preamble_correlation.clamp(0.0, 255.0) as u8;
 
         // Determine message type based on data length
         let message_type = if data.len() <= 7 {
@@ -261,34 +261,7 @@ impl crate::output_module::OutputModule for BeastOutput {
     }
 }
 
-/// Builder for BEAST output modules
-pub struct BeastOutputBuilder;
-
-impl BeastOutputBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::output_module::OutputModuleBuilder for BeastOutputBuilder {
-    fn module_type(&self) -> &str {
-        "beast"
-    }
-
-    fn description(&self) -> &str {
-        "BEAST binary protocol for dump1090 compatibility"
-    }
-
-    fn default_port(&self) -> u16 {
-        30005
-    }
-
-    async fn build(&self, config: crate::output_module::OutputModuleConfig) -> Result<Box<dyn crate::output_module::OutputModule>> {
-        let module = BeastOutput::new(config).await?;
-        Ok(Box::new(module))
-    }
-}
+// Builder implementation removed - using direct instantiation in main
 
 #[cfg(test)]
 mod tests {

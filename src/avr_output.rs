@@ -32,7 +32,7 @@ impl AvrMessage {
 
         // Convert correlation strength to signal level (dBFS approximation)
         // Map 0-50 correlation to -50 to 0 dBFS range
-        let signal_level = ((metadata.preamble_correlation.min(50.0).max(0.0) / 50.0) * 50.0 - 50.0) as i32;
+        let signal_level = ((metadata.preamble_correlation.clamp(0.0, 50.0) / 50.0) * 50.0 - 50.0) as i32;
 
         Self {
             timestamp,
@@ -223,34 +223,7 @@ impl crate::output_module::OutputModule for AvrOutput {
     }
 }
 
-/// Builder for AVR output modules
-pub struct AvrOutputBuilder;
-
-impl AvrOutputBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::output_module::OutputModuleBuilder for AvrOutputBuilder {
-    fn module_type(&self) -> &str {
-        "avr"
-    }
-
-    fn description(&self) -> &str {
-        "AVR text format with timestamps for dump1090 compatibility"
-    }
-
-    fn default_port(&self) -> u16 {
-        30003
-    }
-
-    async fn build(&self, config: crate::output_module::OutputModuleConfig) -> Result<Box<dyn crate::output_module::OutputModule>> {
-        let module = AvrOutput::new(config).await?;
-        Ok(Box::new(module))
-    }
-}
+// Builder implementation removed - using direct instantiation in main
 
 #[cfg(test)]
 mod tests {

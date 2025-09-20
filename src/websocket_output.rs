@@ -261,34 +261,7 @@ impl crate::output_module::OutputModule for WebSocketOutput {
     }
 }
 
-/// Builder for WebSocket output modules
-pub struct WebSocketOutputBuilder;
-
-impl WebSocketOutputBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::output_module::OutputModuleBuilder for WebSocketOutputBuilder {
-    fn module_type(&self) -> &str {
-        "websocket"
-    }
-
-    fn description(&self) -> &str {
-        "WebSocket server for real-time ADS-B data streaming to web applications"
-    }
-
-    fn default_port(&self) -> u16 {
-        8080
-    }
-
-    async fn build(&self, config: crate::output_module::OutputModuleConfig) -> Result<Box<dyn crate::output_module::OutputModule>> {
-        let module = WebSocketOutput::new(config).await?;
-        Ok(Box::new(module))
-    }
-}
+// Builder implementation removed - using direct instantiation in main
 
 #[cfg(test)]
 mod tests {

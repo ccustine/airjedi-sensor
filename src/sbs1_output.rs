@@ -136,7 +136,7 @@ impl Sbs1Message {
                         alert: false,
                         emergency: false,
                         spi: false,
-                        is_on_ground: type_code >= 5 && type_code <= 8,
+                        is_on_ground: (5..=8).contains(&type_code),
                     })
                 }
                 19 => {
@@ -419,34 +419,7 @@ impl crate::output_module::OutputModule for Sbs1Output {
     }
 }
 
-/// Builder for SBS-1 output modules
-pub struct Sbs1OutputBuilder;
-
-impl Sbs1OutputBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::output_module::OutputModuleBuilder for Sbs1OutputBuilder {
-    fn module_type(&self) -> &str {
-        "sbs1"
-    }
-
-    fn description(&self) -> &str {
-        "SBS-1/BaseStation CSV format for port 30004 compatibility"
-    }
-
-    fn default_port(&self) -> u16 {
-        30004
-    }
-
-    async fn build(&self, config: crate::output_module::OutputModuleConfig) -> Result<Box<dyn crate::output_module::OutputModule>> {
-        let module = Sbs1Output::new(config).await?;
-        Ok(Box::new(module))
-    }
-}
+// Builder implementation removed - using direct instantiation in main
 
 #[cfg(test)]
 mod tests {
