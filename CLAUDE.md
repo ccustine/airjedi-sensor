@@ -20,6 +20,12 @@ cargo run --release
 
 # Run with custom parameters (see listen-adsb binary for all options)
 cargo run -- --gain 40.0 --preamble-threshold 12.0
+
+# Run with rate limiting enabled to reduce CPU usage on high-traffic scenarios
+cargo run -- --rate-limit
+
+# Run with custom rate limiting intervals
+cargo run -- --rate-limit --position-rate-ms 1000 --velocity-rate-ms 2000
 ```
 
 ## Architecture
@@ -29,7 +35,8 @@ cargo run -- --gain 40.0 --preamble-threshold 12.0
 - **Preamble Detector** (`src/preamble_detector.rs`): Detects ADS-B message preambles in the signal
 - **Demodulator** (`src/demodulator.rs`): Demodulates detected frames into bit streams  
 - **Decoder** (`src/decoder.rs`): Decodes bit streams into ADS-B packets using the `adsb_deku` library
-- **Tracker** (`src/tracker.rs`): Maintains aircraft state and position tracking with optional aircraft lifetime management
+- **Tracker** (`src/tracker.rs`): Maintains aircraft state and position tracking with optional aircraft lifetime management and rate limiting
+- **Rate Limiter** (`src/rate_limiter.rs`): Provides configurable rate limiting to reduce CPU usage on high-frequency updates
 
 ### Signal Processing Flow
 
@@ -52,8 +59,65 @@ The application uses FutureSDR's flowgraph architecture:
 
 Edit `config.toml` to modify:
 - `log_level`: Logging verbosity
-- `ctrlport_bind`: Web server bind address and port  
+- `ctrlport_bind`: Web server bind address and port
 - `frontend_path`: Path to web interface files
+
+## Rate Limiting
+
+AirJedi includes sophisticated rate limiting capabilities to reduce CPU usage in high-traffic scenarios where aircraft send frequent, repetitive updates. This is particularly useful for GPS data processing where updates need to be filtered to prevent resource waste.
+
+### Features
+
+- **Per-aircraft rate limiting**: Each aircraft is tracked independently
+- **Per-message type limiting**: Different limits for positions, velocities, identification, and metadata
+- **Time-based debouncing**: Rapid updates are queued and only the latest is processed
+- **Automatic cleanup**: Inactive aircraft are automatically removed from tracking
+- **Real-time monitoring**: Statistics and metrics available via control port
+
+### Default Rate Limits
+
+- **Position updates**: 500ms (maximum 2 updates per second)
+- **Velocity updates**: 1000ms (maximum 1 update per second)
+- **Identification updates**: 0ms (immediate, no rate limiting)
+- **Metadata updates**: 5000ms (maximum 1 update per 5 seconds)
+
+### Usage
+
+```bash
+# Enable rate limiting with default settings
+cargo run -- --rate-limit
+
+# Customize rate limiting intervals (in milliseconds)
+cargo run -- --rate-limit \
+    --position-rate-ms 1000 \
+    --velocity-rate-ms 2000 \
+    --identification-rate-ms 0 \
+    --metadata-rate-ms 10000
+
+# Rate limiting works with all output formats
+cargo run -- --rate-limit --beast --raw --sbs1 --websocket
+```
+
+### Monitoring
+
+Rate limiting statistics are logged every 30 seconds when enabled:
+```
+Rate Limiting Stats: 1250 total updates, 65% immediate, 35% rate-limited, 12 active aircraft, 8 pending updates
+```
+
+You can also query statistics via the control port:
+- Send `"stats"` to get rate limiting statistics in JSON format
+- Send `"aircraft"` to get aircraft data (same as before)
+
+### Architecture
+
+The rate limiting system uses a **Rate-Limited State Manager** pattern that combines:
+- **State tracking** per aircraft with configurable update intervals
+- **Time-based debouncing** to handle rapid update bursts
+- **LRU-style cleanup** to prevent memory leaks from inactive aircraft
+- **Multi-tier output pipeline** separating immediate broadcasting from state updates
+
+This ensures external consumers (via BEAST, Raw, SBS-1, WebSocket outputs) always receive immediate updates while internal state tracking is intelligently rate-limited.
 
 ## Dependencies
 

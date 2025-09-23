@@ -5,6 +5,7 @@ use airjedi::Decoder;
 use airjedi::Demodulator;
 use airjedi::PreambleDetector;
 use airjedi::Tracker;
+use airjedi::RateLimitConfig;
 use anyhow::Result;
 use clap::Parser;
 use clap::command;
@@ -44,6 +45,23 @@ struct Args {
     /// Remove aircrafts when no packets have been received for the specified number of seconds
     #[arg(short, long)]
     lifetime: Option<u64>,
+
+    // Rate limiting arguments
+    /// Enable rate limiting to reduce CPU usage on high-frequency updates
+    #[arg(long)]
+    rate_limit: bool,
+    /// Position update rate limit in milliseconds (default: 500ms)
+    #[arg(long, default_value_t = 500)]
+    position_rate_ms: u64,
+    /// Velocity update rate limit in milliseconds (default: 1000ms)
+    #[arg(long, default_value_t = 1000)]
+    velocity_rate_ms: u64,
+    /// Identification update rate limit in milliseconds (default: 0ms = immediate)
+    #[arg(long, default_value_t = 0)]
+    identification_rate_ms: u64,
+    /// Metadata update rate limit in milliseconds (default: 5000ms)
+    #[arg(long, default_value_t = 5000)]
+    metadata_rate_ms: u64,
 
     // Output module arguments
     /// Enable BEAST mode output (dump1090 compatible)
@@ -222,9 +240,23 @@ async fn main() -> Result<()> {
         ]
     }
 
-    // Create tracker with dynamic output module system
+    // Create tracker with dynamic output module system and optional rate limiting
     let prune_after = args.lifetime.map(Duration::from_secs);
-    let tracker = Tracker::new_with_modules(prune_after, output_manager);
+    let tracker = if args.rate_limit {
+        let rate_config = RateLimitConfig {
+            position_interval: Duration::from_millis(args.position_rate_ms),
+            velocity_interval: Duration::from_millis(args.velocity_rate_ms),
+            identification_interval: Duration::from_millis(args.identification_rate_ms),
+            metadata_interval: Duration::from_millis(args.metadata_rate_ms),
+        };
+        println!(
+            "Rate limiting enabled: Position {}ms, Velocity {}ms, ID {}ms, Metadata {}ms",
+            args.position_rate_ms, args.velocity_rate_ms, args.identification_rate_ms, args.metadata_rate_ms
+        );
+        Tracker::new_with_modules_and_rate_limiting(prune_after, output_manager, Some(rate_config))
+    } else {
+        Tracker::new_with_modules(prune_after, output_manager)
+    };
     
     let adsb_tracker = fg.add_block(tracker)?;
     fg.connect_message(adsb_decoder, "out", adsb_tracker, "in")?;

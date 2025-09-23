@@ -46,9 +46,22 @@ pub use websocket_output::{WebSocketBroadcaster, WebSocketMessage, WebSocketServ
 mod output_module;
 pub use output_module::{OutputModule, OutputModuleBuilder, OutputModuleConfig, OutputModuleManager, OutputModuleRegistry};
 
+mod rate_limiter;
+pub use rate_limiter::{
+    ItemRateLimiter, PendingUpdate, RateLimitConfig, RateLimitResult, RateLimitStats,
+    UpdateTracker, UpdateType,
+};
+
+mod rate_limited_manager;
+pub use rate_limited_manager::{RateLimitedStateManager, RateLimitedStateManagerBuilder};
+
 // Macros for reducing output module boilerplate
 #[macro_use]
 pub mod macros;
+
+// Integration tests for rate limiting functionality
+#[cfg(test)]
+mod rate_limiting_integration_tests;
 
 type AdsbIcao = adsb_deku::ICAO;
 type AdsbIdentification = adsb_deku::adsb::Identification;
