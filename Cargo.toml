@@ -13,7 +13,7 @@ authors = ["ccustine"]
 
 [[bin]]
 name = "airjedi"
-path = "src/bin/listen_adsb.rs"
+path = "src/bin/airjedi.rs"
 
 [features]
 default = ["soapy"]

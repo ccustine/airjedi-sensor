@@ -160,14 +160,14 @@ AirJedi supports multiple output formats for compatibility with various ADS-B to
 - **Protocol**: `*{hexdata};\n` format
 - **Compatibility**: dump1090 port 30002, simple monitoring tools
 
-### AVR Format (Port 30003)
+### AVR Format (Port 30001)
 - **Default**: Disabled by default
 - **Description**: Text format with timestamps and signal levels
 - **Usage**: `--avr`, `--avr-port <PORT>`
 - **Protocol**: `@{timestamp}\n*{hexdata};\n` format
 - **Compatibility**: dump1090 AVR format, debugging tools
 
-### SBS-1/BaseStation Format (Port 30004)
+### SBS-1/BaseStation Format (Port 30003)
 - **Default**: Disabled by default
 - **Description**: CSV format compatible with BaseStation and SBS-1 receivers
 - **Usage**: `--sbs1`, `--sbs1-port <PORT>`
@@ -179,12 +179,13 @@ AirJedi supports multiple output formats for compatibility with various ADS-B to
 
 ### WebSocket Format (Port 8080)
 - **Default**: Disabled by default
-- **Description**: Real-time WebSocket streaming with BEAST format messages
+- **Description**: Real-time WebSocket streaming with SBS-1 CSV format messages
 - **Usage**: `--websocket`, `--websocket-port <PORT>`
-- **Protocol**: Binary WebSocket messages containing BEAST-encoded ADS-B data
+- **Protocol**: Text WebSocket messages containing SBS-1/BaseStation CSV data
 - **Compatibility**: Web browsers, JavaScript applications, real-time web dashboards
-- **Message Format**: Each WebSocket message contains a complete BEAST-format packet
+- **Message Format**: Each WebSocket message contains SBS-1 CSV formatted aircraft data (MSG,1/2/3/4)
 - **Use Cases**: Real-time web applications, live flight tracking interfaces, custom dashboards
+- **Note**: WebSocket broadcasts state-based updates (identification, position, velocity) rather than raw packets
 
 ## Example Usage
 
@@ -196,7 +197,7 @@ cargo run
 cargo run -- --avr --sbs1 --websocket
 
 # Custom ports to avoid conflicts
-cargo run -- --beast-port 40005 --raw-port 40002 --sbs1-port 40004 --websocket-port 9090
+cargo run -- --beast-port 40005 --raw-port 40002 --sbs1-port 40003 --websocket-port 9090
 
 # Enable only WebSocket output for web applications
 cargo run -- --no-beast --no-raw --websocket
@@ -213,23 +214,41 @@ For web applications connecting to the WebSocket output:
 // Connect to AirJedi WebSocket server
 const ws = new WebSocket('ws://localhost:8080');
 
-// Handle binary BEAST messages
+// Handle SBS-1 CSV text messages
 ws.onmessage = function(event) {
-    // event.data is an ArrayBuffer containing BEAST format data
-    const data = new Uint8Array(event.data);
-    
-    // BEAST format: [0x1A, type, timestamp(6), signal, payload...]
-    if (data[0] === 0x1A) {  // BEAST escape character
-        const messageType = data[1];  // 0x31=short, 0x32=long
-        const timestamp = data.slice(2, 8);  // 6 bytes
-        const signal = data[8];  // Signal strength
-        const payload = data.slice(9);  // ADS-B message
-        
-        console.log('ADS-B Message:', {
-            type: messageType === 0x31 ? 'short' : 'long',
-            signal: signal,
-            data: Array.from(payload).map(b => b.toString(16).padStart(2, '0')).join('')
-        });
+    // event.data is a string containing SBS-1 CSV format data
+    const csvData = event.data;
+    const fields = csvData.split(',');
+
+    // SBS-1 format: MSG,type,session,aircraft,icao,flight,date_gen,time_gen,date_log,time_log,...
+    if (fields[0] === 'MSG') {
+        const messageType = parseInt(fields[1]);
+        const icao = fields[4];
+
+        switch (messageType) {
+            case 1:  // Identification (callsign)
+                console.log('Aircraft Identification:', {
+                    icao: icao,
+                    callsign: fields[10]
+                });
+                break;
+            case 3:  // Airborne Position
+                console.log('Aircraft Position:', {
+                    icao: icao,
+                    altitude: fields[11],
+                    latitude: fields[14],
+                    longitude: fields[15]
+                });
+                break;
+            case 4:  // Airborne Velocity
+                console.log('Aircraft Velocity:', {
+                    icao: icao,
+                    groundSpeed: fields[12],
+                    track: fields[13],
+                    verticalRate: fields[16]
+                });
+                break;
+        }
     }
 };
 
@@ -241,3 +260,37 @@ ws.onerror = function(error) {
     console.error('WebSocket error:', error);
 };
 ```
+
+## WebSocket Security Model
+
+**IMPORTANT**: The WebSocket server is designed for **local-only use** and has minimal security controls:
+
+### Security Characteristics
+
+- **No Authentication**: Any client that can reach the port can connect and receive data
+- **No Authorization**: All connected clients receive all aircraft data
+- **No Origin Validation**: No CORS checks - any website can connect via JavaScript
+- **No TLS/Encryption**: Plain TCP WebSocket (ws://) without encryption (wss:// not supported)
+- **No Rate Limiting**: Clients can connect and consume data without throttling
+- **Public Data**: ADS-B data is inherently public information broadcast by aircraft
+
+### Recommended Deployment
+
+1. **Bind to localhost only** (default: 127.0.0.1:8080) - prevents external access
+2. **Use firewall rules** to restrict access if binding to non-localhost interfaces
+3. **Deploy behind reverse proxy** if internet access is needed (add authentication/TLS there)
+4. **Monitor connections** via client_count metrics to detect unexpected clients
+
+### Acceptable Use Cases
+
+- ✅ Local development and testing
+- ✅ Single-user desktop applications
+- ✅ Trusted local network deployments
+- ✅ Behind authenticated reverse proxy (nginx, Apache with auth)
+
+### Unsuitable Use Cases
+
+- ❌ Direct internet exposure without additional security layers
+- ❌ Multi-tenant environments without isolation
+- ❌ Scenarios requiring data access auditing
+- ❌ Compliance-regulated environments without additional controls

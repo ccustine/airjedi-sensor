@@ -1,4 +1,4 @@
-//! SBS-1/BaseStation format output for port 30004 compatibility
+//! SBS-1/BaseStation format output for port 30003 compatibility
 //! 
 //! This module implements the SBS-1 (BaseStation) CSV format protocol originally 
 //! developed by Kinetic Avionics for their SBS-1 receiver. This format is widely
@@ -24,8 +24,10 @@
 //! - MSG,8: All-call reply
 
 use crate::decoder::DecoderMetaData;
+use crate::output_module::{OutputModuleBase, StateOutputModule};
+use crate::{AdsbIcao, AircraftRecord};
 use anyhow::Result;
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
@@ -59,172 +61,227 @@ pub struct Sbs1Message {
 }
 
 impl Sbs1Message {
-    /// Create a new SBS-1 message from ADS-B packet bytes
-    pub fn from_adsb_packet(data: &[u8], metadata: &DecoderMetaData) -> Option<Self> {
-        // Parse the ADS-B message to extract relevant data
-        if data.len() < 14 {
-            return None;
-        }
-
-        // Extract ICAO address (bytes 1-3)
-        let icao = format!("{:02X}{:02X}{:02X}", data[1], data[2], data[3]);
-        
-        // Get timestamp components
-        let timestamp = metadata.timestamp
+    /// Helper function to generate date/time strings from SystemTime
+    fn format_timestamp(timestamp: SystemTime) -> (String, String) {
+        let duration = timestamp
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
-        
-        let datetime = chrono::DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
+
+        let datetime = chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0)
             .unwrap_or_default();
-        
+
         let date_str = datetime.format("%Y/%m/%d").to_string();
         let time_str = datetime.format("%H:%M:%S.%3f").to_string();
 
-        // Determine message type based on ADS-B data
-        if data.len() >= 5 {
-            let type_code = (data[4] >> 3) & 0x1F;
-            
-            match type_code {
-                1..=4 => {
-                    // Aircraft identification message (MSG,1)
-                    Some(Self {
-                        message_type: 1,
-                        transmission_type: 1,
-                        session_id: 1,
-                        aircraft_id: 1,
-                        hex_ident: icao,
-                        flight_id: 1,
-                        date_generated: date_str.clone(),
-                        time_generated: time_str.clone(),
-                        date_logged: date_str,
-                        time_logged: time_str,
-                        callsign: None, // Will be extracted by caller if available
-                        altitude: None,
-                        ground_speed: None,
-                        track: None,
-                        latitude: None,
-                        longitude: None,
-                        vertical_rate: None,
-                        squawk: None,
-                        alert: false,
-                        emergency: false,
-                        spi: false,
-                        is_on_ground: false,
-                    })
-                }
-                9..=18 => {
-                    // Airborne position message (MSG,3)
-                    Some(Self {
-                        message_type: 3,
-                        transmission_type: 3,
-                        session_id: 1,
-                        aircraft_id: 1,
-                        hex_ident: icao,
-                        flight_id: 1,
-                        date_generated: date_str.clone(),
-                        time_generated: time_str.clone(),
-                        date_logged: date_str,
-                        time_logged: time_str,
-                        callsign: None,
-                        altitude: None, // Will be extracted by caller if available
-                        ground_speed: None,
-                        track: None,
-                        latitude: None, // Will be extracted by caller if available
-                        longitude: None, // Will be extracted by caller if available
-                        vertical_rate: None,
-                        squawk: None,
-                        alert: false,
-                        emergency: false,
-                        spi: false,
-                        is_on_ground: (5..=8).contains(&type_code),
-                    })
-                }
-                19 => {
-                    // Airborne velocity message (MSG,4)
-                    Some(Self {
-                        message_type: 4,
-                        transmission_type: 4,
-                        session_id: 1,
-                        aircraft_id: 1,
-                        hex_ident: icao,
-                        flight_id: 1,
-                        date_generated: date_str.clone(),
-                        time_generated: time_str.clone(),
-                        date_logged: date_str,
-                        time_logged: time_str,
-                        callsign: None,
-                        altitude: None,
-                        ground_speed: None, // Will be extracted by caller if available
-                        track: None, // Will be extracted by caller if available
-                        latitude: None,
-                        longitude: None,
-                        vertical_rate: None, // Will be extracted by caller if available
-                        squawk: None,
-                        alert: false,
-                        emergency: false,
-                        spi: false,
-                        is_on_ground: false,
-                    })
-                }
-                _ => {
-                    // Generic message for other types
-                    Some(Self {
-                        message_type: 5,
-                        transmission_type: 5,
-                        session_id: 1,
-                        aircraft_id: 1,
-                        hex_ident: icao,
-                        flight_id: 1,
-                        date_generated: date_str.clone(),
-                        time_generated: time_str.clone(),
-                        date_logged: date_str,
-                        time_logged: time_str,
-                        callsign: None,
-                        altitude: None,
-                        ground_speed: None,
-                        track: None,
-                        latitude: None,
-                        longitude: None,
-                        vertical_rate: None,
-                        squawk: None,
-                        alert: false,
-                        emergency: false,
-                        spi: false,
-                        is_on_ground: false,
-                    })
-                }
-            }
-        } else {
-            None
+        (date_str, time_str)
+    }
+
+    /// Create MSG,1: ES Identification and Category message
+    pub fn identification(icao: &str, callsign: &str, timestamp: SystemTime) -> Self {
+        let (date_str, time_str) = Self::format_timestamp(timestamp);
+
+        Self {
+            message_type: 1,
+            transmission_type: 1,
+            session_id: 1,
+            aircraft_id: 1,
+            hex_ident: icao.to_string(),
+            flight_id: 1,
+            date_generated: date_str.clone(),
+            time_generated: time_str.clone(),
+            date_logged: date_str,
+            time_logged: time_str,
+            callsign: Some(callsign.trim().to_string()),
+            altitude: None,
+            ground_speed: None,
+            track: None,
+            latitude: None,
+            longitude: None,
+            vertical_rate: None,
+            squawk: None,
+            alert: false,
+            emergency: false,
+            spi: false,
+            is_on_ground: false,
         }
     }
 
-    /// Set aircraft identification data
-    pub fn with_identification(mut self, callsign: Option<String>) -> Self {
-        self.callsign = callsign;
-        self
+    /// Create MSG,2: ES Surface Position Message
+    pub fn surface_position(
+        icao: &str,
+        latitude: f64,
+        longitude: f64,
+        altitude: Option<u16>,
+        ground_speed: Option<f64>,
+        track: Option<f64>,
+        timestamp: SystemTime,
+    ) -> Self {
+        let (date_str, time_str) = Self::format_timestamp(timestamp);
+
+        Self {
+            message_type: 2,
+            transmission_type: 2,
+            session_id: 1,
+            aircraft_id: 1,
+            hex_ident: icao.to_string(),
+            flight_id: 1,
+            date_generated: date_str.clone(),
+            time_generated: time_str.clone(),
+            date_logged: date_str,
+            time_logged: time_str,
+            callsign: None,
+            altitude: altitude.map(|a| a as i32),
+            ground_speed,
+            track,
+            latitude: Some(latitude),
+            longitude: Some(longitude),
+            vertical_rate: None,
+            squawk: None,
+            alert: false,
+            emergency: false,
+            spi: false,
+            is_on_ground: true,
+        }
     }
 
-    /// Set position data
-    pub fn with_position(mut self, altitude: Option<i32>, latitude: Option<f64>, longitude: Option<f64>) -> Self {
-        self.altitude = altitude;
-        self.latitude = latitude;
-        self.longitude = longitude;
-        self
+    /// Create MSG,3: ES Airborne Position Message
+    pub fn airborne_position(
+        icao: &str,
+        latitude: f64,
+        longitude: f64,
+        altitude: Option<u16>,
+        timestamp: SystemTime,
+    ) -> Self {
+        let (date_str, time_str) = Self::format_timestamp(timestamp);
+
+        Self {
+            message_type: 3,
+            transmission_type: 3,
+            session_id: 1,
+            aircraft_id: 1,
+            hex_ident: icao.to_string(),
+            flight_id: 1,
+            date_generated: date_str.clone(),
+            time_generated: time_str.clone(),
+            date_logged: date_str,
+            time_logged: time_str,
+            callsign: None,
+            altitude: altitude.map(|a| a as i32),
+            ground_speed: None,
+            track: None,
+            latitude: Some(latitude),
+            longitude: Some(longitude),
+            vertical_rate: None,
+            squawk: None,
+            alert: false,
+            emergency: false,
+            spi: false,
+            is_on_ground: false,
+        }
     }
 
-    /// Set velocity data
-    pub fn with_velocity(mut self, ground_speed: Option<f64>, track: Option<f64>, vertical_rate: Option<i16>) -> Self {
-        self.ground_speed = ground_speed;
-        self.track = track;
-        self.vertical_rate = vertical_rate;
-        self
+    /// Create MSG,4: ES Airborne Velocity Message
+    pub fn airborne_velocity(
+        icao: &str,
+        ground_speed: f64,
+        track: f64,
+        vertical_rate: i16,
+        timestamp: SystemTime,
+    ) -> Self {
+        let (date_str, time_str) = Self::format_timestamp(timestamp);
+
+        Self {
+            message_type: 4,
+            transmission_type: 4,
+            session_id: 1,
+            aircraft_id: 1,
+            hex_ident: icao.to_string(),
+            flight_id: 1,
+            date_generated: date_str.clone(),
+            time_generated: time_str.clone(),
+            date_logged: date_str,
+            time_logged: time_str,
+            callsign: None,
+            altitude: None,
+            ground_speed: Some(ground_speed),
+            track: Some(track),
+            latitude: None,
+            longitude: None,
+            vertical_rate: Some(vertical_rate),
+            squawk: None,
+            alert: false,
+            emergency: false,
+            spi: false,
+            is_on_ground: false,
+        }
     }
 
-    /// Set squawk data
-    pub fn with_squawk(mut self, squawk: Option<u16>) -> Self {
-        self.squawk = squawk;
-        self
+    /// Create MSG,5: Surveillance Alt Message
+    pub fn surveillance_altitude(
+        icao: &str,
+        altitude: u16,
+        timestamp: SystemTime,
+    ) -> Self {
+        let (date_str, time_str) = Self::format_timestamp(timestamp);
+
+        Self {
+            message_type: 5,
+            transmission_type: 5,
+            session_id: 1,
+            aircraft_id: 1,
+            hex_ident: icao.to_string(),
+            flight_id: 1,
+            date_generated: date_str.clone(),
+            time_generated: time_str.clone(),
+            date_logged: date_str,
+            time_logged: time_str,
+            callsign: None,
+            altitude: Some(altitude as i32),
+            ground_speed: None,
+            track: None,
+            latitude: None,
+            longitude: None,
+            vertical_rate: None,
+            squawk: None,
+            alert: false,
+            emergency: false,
+            spi: false,
+            is_on_ground: false,
+        }
+    }
+
+    /// Create MSG,6: Surveillance ID Message (Squawk change)
+    pub fn squawk_change(
+        icao: &str,
+        squawk: u16,
+        timestamp: SystemTime,
+    ) -> Self {
+        let (date_str, time_str) = Self::format_timestamp(timestamp);
+
+        Self {
+            message_type: 6,
+            transmission_type: 6,
+            session_id: 1,
+            aircraft_id: 1,
+            hex_ident: icao.to_string(),
+            flight_id: 1,
+            date_generated: date_str.clone(),
+            time_generated: time_str.clone(),
+            date_logged: date_str,
+            time_logged: time_str,
+            callsign: None,
+            altitude: None,
+            ground_speed: None,
+            track: None,
+            latitude: None,
+            longitude: None,
+            vertical_rate: None,
+            squawk: Some(squawk),
+            alert: false,
+            emergency: false,
+            spi: false,
+            is_on_ground: false,
+        }
     }
 
     /// Encode the message in SBS-1 CSV format
@@ -332,22 +389,17 @@ impl Sbs1Broadcaster {
         (Self { sender }, receiver)
     }
 
-    /// Broadcast an ADS-B packet as an SBS-1 message
-    pub fn broadcast_packet(&self, data: &[u8], metadata: &DecoderMetaData) -> Result<()> {
-        if let Some(message) = Sbs1Message::from_adsb_packet(data, metadata) {
-            match self.sender.send(message) {
-                Ok(receiver_count) => {
-                    debug!("Broadcasted SBS-1 message to {} clients", receiver_count);
-                    Ok(())
-                }
-                Err(_) => {
-                    // No receivers, which is fine
-                    Ok(())
-                }
+    /// Broadcast an SBS-1 message
+    pub fn broadcast_message(&self, message: Sbs1Message) -> Result<()> {
+        match self.sender.send(message) {
+            Ok(receiver_count) => {
+                debug!("Broadcasted SBS-1 message to {} clients", receiver_count);
+                Ok(())
             }
-        } else {
-            // Unable to parse message, skip
-            Ok(())
+            Err(_) => {
+                // No receivers, which is fine
+                Ok(())
+            }
         }
     }
 
@@ -387,22 +439,18 @@ impl Sbs1Output {
     }
 }
 
-#[async_trait::async_trait]
-impl crate::output_module::OutputModule for Sbs1Output {
+// Implement the base trait for common functionality
+impl OutputModuleBase for Sbs1Output {
     fn name(&self) -> &str {
         &self.name
     }
 
     fn description(&self) -> &str {
-        "SBS-1/BaseStation CSV format for port 30004 compatibility"
+        "SBS-1/BaseStation CSV format for port 30003 compatibility"
     }
 
     fn port(&self) -> u16 {
         self.port
-    }
-
-    fn broadcast_packet(&self, data: &[u8], metadata: &DecoderMetaData) -> Result<()> {
-        self.broadcaster.broadcast_packet(data, metadata)
     }
 
     fn client_count(&self) -> usize {
@@ -416,6 +464,84 @@ impl crate::output_module::OutputModule for Sbs1Output {
     fn stop(&mut self) -> Result<()> {
         self.is_running = false;
         Ok(())
+    }
+}
+
+// Implement the state output trait for broadcasting aircraft state updates
+#[async_trait::async_trait]
+impl StateOutputModule for Sbs1Output {
+    fn broadcast_aircraft_update(&self, icao: &AdsbIcao, record: &AircraftRecord) -> Result<()> {
+        let icao_str = format!("{:02X}{:02X}{:02X}", icao.0[0], icao.0[1], icao.0[2]);
+
+        // MSG,1: Aircraft identification (if callsign available)
+        if let Some(ref callsign) = record.callsign {
+            let msg = Sbs1Message::identification(
+                &icao_str,
+                callsign,
+                record.last_seen,
+            );
+            self.broadcaster.broadcast_message(msg)?;
+        }
+
+        // MSG,3: Airborne position (if position available)
+        if let Some(pos_record) = record.positions.last() {
+            let msg = Sbs1Message::airborne_position(
+                &icao_str,
+                pos_record.position.latitude,
+                pos_record.position.longitude,
+                pos_record.position.altitude,
+                pos_record.time,
+            );
+            self.broadcaster.broadcast_message(msg)?;
+        }
+
+        // MSG,4: Airborne velocity (if velocity available)
+        if let Some(vel_record) = record.velocities.last() {
+            let msg = Sbs1Message::airborne_velocity(
+                &icao_str,
+                vel_record.velocity.ground_speed,
+                vel_record.velocity.heading,
+                vel_record.velocity.vertical_rate,
+                vel_record.time,
+            );
+            self.broadcaster.broadcast_message(msg)?;
+        }
+
+        Ok(())
+    }
+}
+
+// Keep legacy trait implementation for backward compatibility during migration
+#[async_trait::async_trait]
+impl crate::output_module::OutputModule for Sbs1Output {
+    fn name(&self) -> &str {
+        OutputModuleBase::name(self)
+    }
+
+    fn description(&self) -> &str {
+        OutputModuleBase::description(self)
+    }
+
+    fn port(&self) -> u16 {
+        OutputModuleBase::port(self)
+    }
+
+    fn broadcast_packet(&self, _data: &[u8], _metadata: &DecoderMetaData) -> Result<()> {
+        // Legacy method - no longer used for SBS-1
+        // SBS-1 now receives state updates via broadcast_aircraft_update
+        Ok(())
+    }
+
+    fn client_count(&self) -> usize {
+        OutputModuleBase::client_count(self)
+    }
+
+    fn is_running(&self) -> bool {
+        OutputModuleBase::is_running(self)
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        OutputModuleBase::stop(self)
     }
 }
 
@@ -459,37 +585,48 @@ mod tests {
     }
 
     #[test]
-    fn test_sbs1_message_from_adsb_packet() {
-        let data = vec![0x8D, 0x40, 0x62, 0x1D, 0x58, 0x41, 0x38, 0x80, 0x2C, 0x8F, 0x7E, 0x4D, 0x0C, 0x3C];
-        let metadata = DecoderMetaData {
-            preamble_index: 12345,
-            preamble_correlation: 15.5,
-            crc_passed: true,
-            timestamp: SystemTime::now(),
-        };
-        
-        let message = Sbs1Message::from_adsb_packet(&data, &metadata);
-        assert!(message.is_some());
-        
-        let msg = message.unwrap();
-        assert_eq!(msg.hex_ident, "40621D");
-        assert_eq!(msg.transmission_type, 3); // Airborne position
+    fn test_sbs1_identification_constructor() {
+        let now = SystemTime::now();
+        let message = Sbs1Message::identification("ABC123", "TEST123", now);
+
+        assert_eq!(message.hex_ident, "ABC123");
+        assert_eq!(message.transmission_type, 1);
+        assert_eq!(message.callsign, Some("TEST123".to_string()));
     }
 
     #[test]
-    fn test_sbs1_identification_message() {
-        let data = vec![0x8D, 0x40, 0x62, 0x1D, 0x20, 0x41, 0x38, 0x80, 0x2C, 0x8F, 0x7E, 0x4D, 0x0C, 0x3C];
-        let metadata = DecoderMetaData {
-            preamble_index: 12345,
-            preamble_correlation: 15.5,
-            crc_passed: true,
-            timestamp: SystemTime::now(),
-        };
-        
-        let message = Sbs1Message::from_adsb_packet(&data, &metadata);
-        assert!(message.is_some());
-        
-        let msg = message.unwrap();
-        assert_eq!(msg.transmission_type, 1); // Aircraft identification
+    fn test_sbs1_airborne_position_constructor() {
+        let now = SystemTime::now();
+        let message = Sbs1Message::airborne_position(
+            "ABC123",
+            40.123456,
+            -74.654321,
+            Some(35000),
+            now,
+        );
+
+        assert_eq!(message.hex_ident, "ABC123");
+        assert_eq!(message.transmission_type, 3);
+        assert_eq!(message.latitude, Some(40.123456));
+        assert_eq!(message.longitude, Some(-74.654321));
+        assert_eq!(message.altitude, Some(35000));
+    }
+
+    #[test]
+    fn test_sbs1_airborne_velocity_constructor() {
+        let now = SystemTime::now();
+        let message = Sbs1Message::airborne_velocity(
+            "ABC123",
+            450.5,
+            270.0,
+            -800,
+            now,
+        );
+
+        assert_eq!(message.hex_ident, "ABC123");
+        assert_eq!(message.transmission_type, 4);
+        assert_eq!(message.ground_speed, Some(450.5));
+        assert_eq!(message.track, Some(270.0));
+        assert_eq!(message.vertical_rate, Some(-800));
     }
 }

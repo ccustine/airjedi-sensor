@@ -75,6 +75,20 @@ macro_rules! output_modules_args {
 /// }
 /// ```
 #[macro_export]
+macro_rules! register_raw_module {
+    ($manager:ident, $module:expr) => {
+        $manager.add_raw_module(Box::new($module))
+    };
+}
+
+#[macro_export]
+macro_rules! register_state_module {
+    ($manager:ident, $module:expr) => {
+        $manager.add_state_module(Box::new($module))
+    };
+}
+
+#[macro_export]
 macro_rules! register_output_modules {
     (
         manager: $manager:ident,
@@ -86,10 +100,21 @@ macro_rules! register_output_modules {
                 port_field: $port:expr,
                 name: $name:expr,
                 success_msg: $success:expr,
-                error_msg: $error:expr
+                error_msg: $error:expr,
+                kind: raw
+            }),* $(,)?
+            $($state_module:ident: {
+                type: $state_module_type:ty,
+                enabled_check: $state_enabled:expr,
+                port_field: $state_port:expr,
+                name: $state_name:expr,
+                success_msg: $state_success:expr,
+                error_msg: $state_error:expr,
+                kind: state
             }),* $(,)?
         ]
     ) => {
+        // Register raw modules
         $(
             if $enabled {
                 let config = $crate::OutputModuleConfig::new($name, $port)
@@ -97,10 +122,27 @@ macro_rules! register_output_modules {
                 match <$module_type>::new(config).await {
                     Ok(module) => {
                         println!($success, $port);
-                        $manager.add_module(Box::new(module));
+                        $manager.add_raw_module(Box::new(module));
                     }
                     Err(e) => {
                         eprintln!("{}: {}", $error, e);
+                    }
+                }
+            }
+        )*
+
+        // Register state modules
+        $(
+            if $state_enabled {
+                let config = $crate::OutputModuleConfig::new($state_name, $state_port)
+                    .with_buffer_capacity(1024);
+                match <$state_module_type>::new(config).await {
+                    Ok(module) => {
+                        println!($state_success, $state_port);
+                        $manager.add_state_module(Box::new(module));
+                    }
+                    Err(e) => {
+                        eprintln!("{}: {}", $state_error, e);
                     }
                 }
             }

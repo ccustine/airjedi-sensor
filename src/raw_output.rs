@@ -5,6 +5,7 @@
 //! exactly matching dump1090's raw output format: *{hexdata};\n
 
 use crate::decoder::DecoderMetaData;
+use crate::output_module::{OutputModuleBase, RawOutputModule};
 use anyhow::Result;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -165,8 +166,8 @@ impl RawOutput {
     }
 }
 
-#[async_trait::async_trait]
-impl crate::output_module::OutputModule for RawOutput {
+// Implement the base trait for common functionality
+impl crate::output_module::OutputModuleBase for RawOutput {
     fn name(&self) -> &str {
         &self.name
     }
@@ -177,10 +178,6 @@ impl crate::output_module::OutputModule for RawOutput {
 
     fn port(&self) -> u16 {
         self.port
-    }
-
-    fn broadcast_packet(&self, data: &[u8], metadata: &DecoderMetaData) -> Result<()> {
-        self.broadcaster.broadcast_packet(data, metadata)
     }
 
     fn client_count(&self) -> usize {
@@ -194,6 +191,46 @@ impl crate::output_module::OutputModule for RawOutput {
     fn stop(&mut self) -> Result<()> {
         self.is_running = false;
         Ok(())
+    }
+}
+
+// Implement the raw output trait for broadcasting raw packets
+#[async_trait::async_trait]
+impl crate::output_module::RawOutputModule for RawOutput {
+    fn broadcast_raw_packet(&self, data: &[u8], metadata: &DecoderMetaData) -> Result<()> {
+        self.broadcaster.broadcast_packet(data, metadata)
+    }
+}
+
+// Keep legacy trait implementation for backward compatibility during migration
+#[async_trait::async_trait]
+impl crate::output_module::OutputModule for RawOutput {
+    fn name(&self) -> &str {
+        OutputModuleBase::name(self)
+    }
+
+    fn description(&self) -> &str {
+        OutputModuleBase::description(self)
+    }
+
+    fn port(&self) -> u16 {
+        OutputModuleBase::port(self)
+    }
+
+    fn broadcast_packet(&self, data: &[u8], metadata: &DecoderMetaData) -> Result<()> {
+        self.broadcast_raw_packet(data, metadata)
+    }
+
+    fn client_count(&self) -> usize {
+        OutputModuleBase::client_count(self)
+    }
+
+    fn is_running(&self) -> bool {
+        OutputModuleBase::is_running(self)
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        OutputModuleBase::stop(self)
     }
 }
 

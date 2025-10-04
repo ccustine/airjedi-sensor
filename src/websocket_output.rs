@@ -1,29 +1,29 @@
 //! WebSocket output module for real-time ADS-B data streaming to web applications
-//! 
-//! This module provides a WebSocket server that broadcasts BEAST mode messages to web clients.
+//!
+//! This module provides a WebSocket server that broadcasts SBS-1 format messages to web clients.
 //! It enables real-time streaming of ADS-B data to web applications with automatic client
 //! connection management and message buffering.
 //!
 //! ## Usage
-//! Web clients can connect to the WebSocket server and receive real-time BEAST mode messages:
+//! Web clients can connect to the WebSocket server and receive real-time SBS-1 CSV messages:
 //! ```javascript
-//! const ws = new WebSocket('ws://localhost:8080/adsb');
+//! const ws = new WebSocket('ws://localhost:30008/adsb');
 //! ws.onmessage = function(event) {
-//!     // event.data contains binary BEAST mode message
-//!     const arrayBuffer = event.data;
-//!     // Process BEAST message...
+//!     // event.data contains SBS-1 CSV format text
+//!     const sbs1Data = event.data;
+//!     // Parse CSV: MSG,type,session,aircraft,icao,flight,date,time,...
 //! };
 //! ```
 //!
 //! ## Message Format
-//! Messages are delivered in BEAST binary format, compatible with dump1090:
-//! - Message Type: 1 byte (0x31 for short, 0x32 for long frames)
-//! - Timestamp: 6 bytes (microseconds since epoch)
-//! - Signal Strength: 1 byte (0-255)
-//! - Data: Variable length ADS-B message payload
+//! Messages are delivered in SBS-1/BaseStation CSV format:
+//! - MSG,1: Aircraft identification (callsign)
+//! - MSG,3: Airborne position (lat, lon, altitude)
+//! - MSG,4: Airborne velocity (speed, heading, vertical rate)
 
-use crate::beast_output::BeastMessage;
-use crate::decoder::DecoderMetaData;
+use crate::sbs1_output::Sbs1Message;
+use crate::output_module::{OutputModuleBase, StateOutputModule};
+use crate::{AdsbIcao, AircraftRecord};
 use anyhow::Result;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
@@ -31,24 +31,18 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 use tracing::{debug, error, info, warn};
 
-/// WebSocket message containing BEAST mode data
+/// WebSocket message containing SBS-1 format data
 #[derive(Debug, Clone)]
 pub struct WebSocketMessage {
-    pub beast_data: Vec<u8>,
+    pub sbs1_data: String,
 }
 
 impl WebSocketMessage {
-    /// Create a WebSocket message from BEAST message
-    pub fn from_beast_message(beast_msg: &BeastMessage) -> Self {
+    /// Create a WebSocket message from SBS-1 message
+    pub fn from_sbs1_message(sbs1_msg: &Sbs1Message) -> Self {
         Self {
-            beast_data: beast_msg.encode(),
+            sbs1_data: sbs1_msg.encode(),
         }
-    }
-
-    /// Create a WebSocket message from raw ADS-B packet
-    pub fn from_adsb_packet(data: &[u8], metadata: &DecoderMetaData) -> Self {
-        let beast_msg = BeastMessage::from_adsb_packet(data, metadata);
-        Self::from_beast_message(&beast_msg)
     }
 }
 
@@ -138,8 +132,8 @@ impl WebSocketServer {
                 msg = message_receiver.recv() => {
                     match msg {
                         Ok(message) => {
-                            let binary_msg = Message::Binary(message.beast_data);
-                            if let Err(e) = ws_sender.send(binary_msg).await {
+                            let text_msg = Message::Text(message.sbs1_data);
+                            if let Err(e) = ws_sender.send(text_msg).await {
                                 debug!("Failed to send WebSocket message: {}", e);
                                 break;
                             }
@@ -178,9 +172,9 @@ impl WebSocketBroadcaster {
         (Self { sender }, receiver)
     }
 
-    /// Broadcast an ADS-B packet as a WebSocket message
-    pub fn broadcast_packet(&self, data: &[u8], metadata: &DecoderMetaData) -> Result<()> {
-        let message = WebSocketMessage::from_adsb_packet(data, metadata);
+    /// Broadcast an SBS-1 message to WebSocket clients
+    pub fn broadcast_message(&self, sbs1_msg: Sbs1Message) -> Result<()> {
+        let message = WebSocketMessage::from_sbs1_message(&sbs1_msg);
         match self.sender.send(message) {
             Ok(receiver_count) => {
                 debug!("Broadcasted WebSocket message to {} clients", receiver_count);
@@ -229,22 +223,18 @@ impl WebSocketOutput {
     }
 }
 
-#[async_trait::async_trait]
-impl crate::output_module::OutputModule for WebSocketOutput {
+// Implement the base trait for common functionality
+impl crate::output_module::OutputModuleBase for WebSocketOutput {
     fn name(&self) -> &str {
         &self.name
     }
 
     fn description(&self) -> &str {
-        "WebSocket server for real-time ADS-B data streaming to web applications"
+        "WebSocket server for real-time SBS-1 format ADS-B data streaming to web applications"
     }
 
     fn port(&self) -> u16 {
         self.port
-    }
-
-    fn broadcast_packet(&self, data: &[u8], metadata: &DecoderMetaData) -> Result<()> {
-        self.broadcaster.broadcast_packet(data, metadata)
     }
 
     fn client_count(&self) -> usize {
@@ -261,41 +251,75 @@ impl crate::output_module::OutputModule for WebSocketOutput {
     }
 }
 
-// Builder implementation removed - using direct instantiation in main
+// Implement the state output trait for broadcasting aircraft state
+impl crate::output_module::StateOutputModule for WebSocketOutput {
+    fn broadcast_aircraft_update(&self, icao: &AdsbIcao, record: &AircraftRecord) -> Result<()> {
+        let icao_str = format!("{:02X}{:02X}{:02X}", icao.0[0], icao.0[1], icao.0[2]);
+
+        // Broadcast identification message if we have a callsign
+        if let Some(ref callsign) = record.callsign {
+            let msg = Sbs1Message::identification(&icao_str, callsign, record.last_seen);
+            self.broadcaster.broadcast_message(msg)?;
+        }
+
+        // Broadcast position message if we have position data
+        if let Some(pos_record) = record.positions.last() {
+            let msg = Sbs1Message::airborne_position(
+                &icao_str,
+                pos_record.position.latitude,
+                pos_record.position.longitude,
+                pos_record.position.altitude,
+                pos_record.time,
+            );
+            self.broadcaster.broadcast_message(msg)?;
+        }
+
+        // Broadcast velocity message if we have velocity data
+        if let Some(vel_record) = record.velocities.last() {
+            let msg = Sbs1Message::airborne_velocity(
+                &icao_str,
+                vel_record.velocity.ground_speed,
+                vel_record.velocity.heading,
+                vel_record.velocity.vertical_rate,
+                vel_record.time,
+            );
+            self.broadcaster.broadcast_message(msg)?;
+        }
+
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::beast_output::BeastMessage;
     use std::time::SystemTime;
 
     #[test]
-    fn test_websocket_message_from_beast() {
-        let beast_msg = BeastMessage {
-            message_type: crate::beast_output::BeastMessageType::ModeSLong,
-            timestamp: 1234567890,
-            signal_strength: 200,
-            data: vec![0x8D, 0x40, 0x62, 0x1D, 0x58, 0x41, 0x38, 0x80, 0x2C, 0x8F, 0x7E, 0x4D, 0x0C, 0x3C],
-        };
-        
-        let ws_message = WebSocketMessage::from_beast_message(&beast_msg);
-        assert!(!ws_message.beast_data.is_empty());
-        assert_eq!(ws_message.beast_data[0], 0x1A); // BEAST escape character
-        assert_eq!(ws_message.beast_data[1], 0x32); // Mode-S long frame type
+    fn test_websocket_message_from_sbs1() {
+        let sbs1_msg = Sbs1Message::identification("A12345", "TEST123", SystemTime::now());
+
+        let ws_message = WebSocketMessage::from_sbs1_message(&sbs1_msg);
+        assert!(!ws_message.sbs1_data.is_empty());
+        assert!(ws_message.sbs1_data.starts_with("MSG,1,"));
+        assert!(ws_message.sbs1_data.contains("A12345"));
+        assert!(ws_message.sbs1_data.contains("TEST123"));
     }
 
     #[test]
-    fn test_websocket_message_from_adsb_packet() {
-        let data = vec![0x8D, 0x40, 0x62, 0x1D, 0x58, 0x41, 0x38, 0x80, 0x2C, 0x8F, 0x7E, 0x4D, 0x0C, 0x3C];
-        let metadata = DecoderMetaData {
-            preamble_index: 12345,
-            preamble_correlation: 15.5,
-            crc_passed: true,
-            timestamp: SystemTime::now(),
-        };
-        
-        let ws_message = WebSocketMessage::from_adsb_packet(&data, &metadata);
-        assert!(!ws_message.beast_data.is_empty());
-        assert_eq!(ws_message.beast_data[0], 0x1A); // BEAST escape character
+    fn test_websocket_message_format() {
+        let sbs1_msg = Sbs1Message::airborne_position(
+            "ABCDEF",
+            37.5,
+            -122.3,
+            Some(35000),
+            SystemTime::now(),
+        );
+
+        let ws_message = WebSocketMessage::from_sbs1_message(&sbs1_msg);
+        assert!(ws_message.sbs1_data.starts_with("MSG,3,"));
+        assert!(ws_message.sbs1_data.contains("ABCDEF"));
+        assert!(ws_message.sbs1_data.contains("37.5"));
+        assert!(ws_message.sbs1_data.contains("-122.3"));
     }
 }

@@ -253,10 +253,16 @@ impl Tracker {
         if !self.aircraft_register.register.contains_key(icao) {
             self.register_aircraft(icao);
         }
-        let rec = self.aircraft_register.register.get_mut(icao).unwrap();
+        let rec = self.aircraft_register.register.get_mut(icao)
+            .expect("Aircraft record should exist after registration");
         rec.callsign = Some(identification.cn.clone());
         rec.emitter_category = Some(identification.ca);
         self.update_last_seen(icao);
+
+        // Broadcast state update to state-based outputs (SBS-1)
+        if let Some(record) = self.aircraft_register.register.get(icao) {
+            self.output_manager.broadcast_state(icao, record);
+        }
     }
 
     fn airborne_position_received(
@@ -311,8 +317,14 @@ impl Tracker {
                         position: new_pos,
                         time: now,
                     };
-                    let rec = self.aircraft_register.register.get_mut(icao).unwrap();
+                    let rec = self.aircraft_register.register.get_mut(icao)
+                        .expect("Aircraft record should exist after position calculation");
                     rec.positions.push(new_rec);
+
+                    // Broadcast state update to state-based outputs (SBS-1)
+                    if let Some(record) = self.aircraft_register.register.get(icao) {
+                        self.output_manager.broadcast_state(icao, record);
+                    }
                 }
             }
         }
@@ -349,8 +361,14 @@ impl Tracker {
                 velocity: new_velocity,
                 time: now,
             };
-            let rec = self.aircraft_register.register.get_mut(icao).unwrap();
+            let rec = self.aircraft_register.register.get_mut(icao)
+                .expect("Aircraft record should exist after velocity calculation");
             rec.velocities.push(new_record);
+
+            // Broadcast state update to state-based outputs (SBS-1)
+            if let Some(record) = self.aircraft_register.register.get(icao) {
+                self.output_manager.broadcast_state(icao, record);
+            }
         }
         self.update_last_seen(icao);
     }
