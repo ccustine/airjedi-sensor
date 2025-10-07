@@ -1,4 +1,5 @@
 use crate::DemodPacket;
+use crate::metrics;
 use adsb_deku::deku::DekuContainerRead;
 use anyhow::bail;
 use futuresdr::macros::async_trait;
@@ -17,6 +18,7 @@ use futuresdr::tracing::debug;
 use futuresdr::tracing::info;
 use futuresdr::tracing::warn;
 use serde::Serialize;
+use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 
 fn bin_to_u64(s: &[u8]) -> u64 {
@@ -127,12 +129,14 @@ impl Decoder {
                     let crc_passed = self.check_crc(&pkt.bits);
                     if crc_passed {
                         self.n_crc_ok += 1;
+                        metrics().packets_crc_passed.fetch_add(1, Ordering::Relaxed);
                         debug!(
                             "Decoded packet with CRC OK (index: {}, preamble correlation: {}, data: {:?})",
                             pkt.preamble_index, pkt.preamble_correlation, pkt.bits
                         );
                     } else {
                         self.n_crc_fail += 1;
+                        metrics().packets_crc_failed.fetch_add(1, Ordering::Relaxed);
                         debug!(
                             "Decoded packet with CRC error (index: {}, preamble correlation: {}, data: {:?})",
                             pkt.preamble_index, pkt.preamble_correlation, pkt.bits
@@ -142,11 +146,15 @@ impl Decoder {
                     if crc_passed || self.forward_failed_crc {
                         match self.decode_packet(pkt, crc_passed, SystemTime::now()) {
                             Ok(decoded_packet) => {
+                                metrics().packets_decoded.fetch_add(1, Ordering::Relaxed);
                                 mio.output_mut(0)
                                     .post(Pmt::Any(Box::new(decoded_packet)))
                                     .await
                             }
-                            _ => info!("Could not decode packet despite valid CRC"),
+                            Err(_) => {
+                                metrics().packets_decode_failed.fetch_add(1, Ordering::Relaxed);
+                                info!("Could not decode packet despite valid CRC")
+                            }
                         }
                     }
                 }

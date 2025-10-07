@@ -12,12 +12,15 @@ use futuresdr::runtime::StreamIo;
 use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
+use futuresdr::tracing::debug;
 use futuresdr::tracing::info;
 use futuresdr::tracing::warn;
 use std::cmp::Ordering;
+use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::{Duration, Instant};
 
 use crate::decoder::DecoderMetaData;
+use crate::metrics;
 use crate::output_module::OutputModuleManager;
 use crate::rate_limiter::{RateLimitConfig, RateLimitResult, UpdateType};
 use crate::rate_limited_manager::RateLimitedStateManager;
@@ -167,12 +170,29 @@ impl Tracker {
             Pmt::Any(a) => {
                 if let Some(adsb_packet) = a.downcast_ref::<AdsbPacket>() {
                     // We received a packet. Update the register.
-                    info!("Received {:?}", adsb_packet);
+                    debug!("Received {:?}", adsb_packet);
                     if let adsb_deku::DF::ADSB(adsb) = &adsb_packet.message.df {
                         let metadata = &adsb_packet.decoder_metadata;
 
                         // Broadcast messages if enabled (always immediate for external consumers)
                         self.broadcast_output_messages(adsb_packet);
+
+                        // Update metrics based on message type
+                        match &adsb.me {
+                            adsb_deku::adsb::ME::AircraftIdentification(_) => {
+                                metrics().msg_identification.fetch_add(1, AtomicOrdering::Relaxed);
+                            }
+                            adsb_deku::adsb::ME::AirbornePositionBaroAltitude(_)
+                            | adsb_deku::adsb::ME::AirbornePositionGNSSAltitude(_) => {
+                                metrics().msg_position.fetch_add(1, AtomicOrdering::Relaxed);
+                            }
+                            adsb_deku::adsb::ME::AirborneVelocity(_) => {
+                                metrics().msg_velocity.fetch_add(1, AtomicOrdering::Relaxed);
+                            }
+                            _ => {
+                                metrics().msg_other.fetch_add(1, AtomicOrdering::Relaxed);
+                            }
+                        }
 
                         // Process messages through rate limiter if enabled, otherwise process directly
                         if self.rate_limiter.is_some() {
@@ -233,6 +253,12 @@ impl Tracker {
             warn!("Aircraft {} is already registered and will be reset", icao);
         }
         self.aircraft_register.register.insert(*icao, record);
+
+        // Update aircraft count metric
+        metrics().aircraft_tracked.store(
+            self.aircraft_register.register.len() as u64,
+            AtomicOrdering::Relaxed,
+        );
     }
 
     fn prune_records(&mut self) {
@@ -241,6 +267,12 @@ impl Tracker {
             self.aircraft_register
                 .register
                 .retain(|_, v| v.last_seen + prune_time >= now);
+
+            // Update aircraft count metric after pruning
+            metrics().aircraft_tracked.store(
+                self.aircraft_register.register.len() as u64,
+                AtomicOrdering::Relaxed,
+            );
         }
     }
 
@@ -495,28 +527,31 @@ impl Kernel for Tracker {
         // Process pending rate-limited updates
         self.process_pending_updates();
 
-        // Set up pruning timer.
-        // To keep things simple, we just run the prune and cleanup
-        // functions every second, although this means that any
-        // item may remain for sec. longer than the prune duration.
-        if self.prune_after.is_some() || self.rate_limiter.is_some() {
-            Timer::after(Duration::from_millis(1000)).await;
+        // Run periodic tasks every second (pruning, cleanup, and metrics logging)
+        Timer::after(Duration::from_millis(1000)).await;
 
-            // Prune aircraft records if enabled
-            if self.prune_after.is_some() {
-                self.prune_records();
-            }
+        // Prune aircraft records if enabled
+        if self.prune_after.is_some() {
+            self.prune_records();
+        }
 
-            // Cleanup rate limiter if enabled
-            if let Some(ref mut rate_limiter) = self.rate_limiter {
-                rate_limiter.cleanup();
-            }
+        // Cleanup rate limiter if enabled
+        if let Some(ref mut rate_limiter) = self.rate_limiter {
+            rate_limiter.cleanup();
+        }
 
-            // Log rate limiting statistics every 30 seconds
-            if self.rate_limiter.is_some() && self.last_stats_log.elapsed() >= Duration::from_secs(30) {
+        // Log statistics every 30 seconds (always enabled)
+        if self.last_stats_log.elapsed() >= Duration::from_secs(30) {
+            // Always log general metrics
+            let snapshot = metrics().snapshot();
+            info!("Metrics: {}", snapshot.format_summary());
+
+            // Also log rate limiting stats if enabled
+            if self.rate_limiter.is_some() {
                 self.log_rate_limit_stats();
-                self.last_stats_log = Instant::now();
             }
+
+            self.last_stats_log = Instant::now();
         }
 
         Ok(())

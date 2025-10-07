@@ -1,3 +1,4 @@
+use crate::metrics;
 use crate::N_SAMPLES_PER_HALF_SYM;
 use futuresdr::macros::async_trait;
 use futuresdr::runtime::BlockMeta;
@@ -11,6 +12,7 @@ use futuresdr::runtime::StreamIoBuilder;
 use futuresdr::runtime::Tag;
 use futuresdr::runtime::TypedBlock;
 use futuresdr::runtime::WorkIo;
+use std::sync::atomic::Ordering;
 
 pub struct PreambleDetector {
     detection_threshold: f32,
@@ -117,6 +119,7 @@ impl Kernel for PreambleDetector {
                 // should be less than the maximum high power.
                 if min_high_pwr > 0.1 * max_high_pwr && max_low_pwr < max_high_pwr {
                     // Tag preamble.
+                    metrics().preambles_detected.fetch_add(1, Ordering::Relaxed);
                     sio.output(0).add_tag(
                         max_corr_idx,
                         Tag::NamedF32("preamble_start".to_string(), max_corr),

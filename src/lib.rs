@@ -55,6 +55,9 @@ pub use rate_limiter::{
 mod rate_limited_manager;
 pub use rate_limited_manager::{RateLimitedStateManager, RateLimitedStateManagerBuilder};
 
+mod metrics;
+pub use metrics::{metrics, GlobalMetrics, MetricsSnapshot};
+
 // Macros for reducing output module boilerplate
 #[macro_use]
 pub mod macros;

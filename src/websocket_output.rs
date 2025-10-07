@@ -22,7 +22,6 @@
 //! - MSG,4: Airborne velocity (speed, heading, vertical rate)
 
 use crate::sbs1_output::Sbs1Message;
-use crate::output_module::{OutputModuleBase, StateOutputModule};
 use crate::{AdsbIcao, AircraftRecord};
 use anyhow::Result;
 use tokio::net::{TcpListener, TcpStream};
