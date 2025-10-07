@@ -104,6 +104,10 @@ struct Args {
     /// Port for WebSocket output
     #[arg(long, default_value_t = 30008)]
     websocket_port: u16,
+
+    /// List available RTL-SDR devices and exit
+    #[arg(long)]
+    list_devices: bool,
 }
 
 fn sample_rate_parser(sample_rate_str: &str) -> Result<f64, String> {
@@ -118,9 +122,106 @@ fn sample_rate_parser(sample_rate_str: &str) -> Result<f64, String> {
     }
 }
 
+/// Check if any SDR devices are available (returns true if devices found)
+fn check_sdr_devices() -> bool {
+    use std::process::Command;
+
+    // Try using SoapySDRUtil to check for devices
+    let output = Command::new("SoapySDRUtil")
+        .arg("--find")
+        .output();
+
+    match output {
+        Ok(result) if result.status.success() => {
+            let stdout = String::from_utf8_lossy(&result.stdout);
+            // Check if we got actual device output (not empty, not "No devices found")
+            !stdout.trim().is_empty() && !stdout.contains("No devices found")
+        }
+        _ => {
+            // Fallback: try rtl_test
+            let rtl_output = Command::new("rtl_test")
+                .arg("-t")
+                .output();
+
+            matches!(rtl_output, Ok(result) if result.status.success())
+        }
+    }
+}
+
+/// List available SDR devices using SoapySDR
+fn list_sdr_devices() -> Result<()> {
+    use std::process::Command;
+
+    println!("Enumerating available SDR devices...\n");
+
+    // Try using SoapySDRUtil to list devices
+    let output = Command::new("SoapySDRUtil")
+        .arg("--find")
+        .output();
+
+    match output {
+        Ok(result) => {
+            if result.status.success() {
+                let stdout = String::from_utf8_lossy(&result.stdout);
+
+                if stdout.trim().is_empty() || stdout.contains("No devices found") {
+                    println!("No SDR devices found.");
+                    println!("\nTroubleshooting:");
+                    println!("  • Make sure your RTL-SDR is plugged in");
+                    println!("  • Check that RTL-SDR drivers are installed (rtl-sdr)");
+                    println!("  • Verify SoapySDR is installed with RTL-SDR support");
+                    println!("  • Try running with sudo if permissions are an issue");
+                } else {
+                    // Parse and display the output
+                    println!("{}", stdout);
+                    println!("\nTo use a specific device with AirJedi:");
+                    println!("  airjedi --args 'driver=rtlsdr'");
+                    println!("  airjedi --args 'driver=rtlsdr,serial=00000001'");
+                }
+            } else {
+                let stderr = String::from_utf8_lossy(&result.stderr);
+                eprintln!("SoapySDRUtil failed: {}", stderr);
+                eprintln!("\nMake sure SoapySDR is installed.");
+            }
+        }
+        Err(e) => {
+            eprintln!("Could not run SoapySDRUtil: {}", e);
+            eprintln!("\nTrying alternate method (rtl_test)...\n");
+
+            // Fallback: try rtl_test
+            let rtl_output = Command::new("rtl_test")
+                .arg("-t")
+                .output();
+
+            match rtl_output {
+                Ok(result) => {
+                    let stdout = String::from_utf8_lossy(&result.stdout);
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    println!("{}{}", stdout, stderr);
+                }
+                Err(_) => {
+                    eprintln!("Could not run rtl_test either.");
+                    eprintln!("\nPlease install one of the following:");
+                    eprintln!("  • SoapySDR (recommended): brew install soapysdr");
+                    eprintln!("  • rtl-sdr tools: brew install librtlsdr");
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Handle device listing
+    if args.list_devices {
+        list_sdr_devices()?;
+        return Ok(());
+    }
+
     let mut fg = Flowgraph::new();
     futuresdr::runtime::init();
 
@@ -132,6 +233,21 @@ async fn main() -> Result<()> {
             throttle_block
         }
         None => {
+            // Check if SDR devices are available before attempting to connect
+            if !check_sdr_devices() {
+                eprintln!("Error: No RTL-SDR or compatible SDR devices found!");
+                eprintln!("\nTroubleshooting:");
+                eprintln!("  • Make sure your RTL-SDR dongle is plugged in");
+                eprintln!("  • Check that RTL-SDR drivers are installed (rtl-sdr)");
+                eprintln!("  • Verify SoapySDR is installed with RTL-SDR support:");
+                eprintln!("    - macOS: brew install soapysdr soapyrtlsdr");
+                eprintln!("    - Linux: apt install soapysdr-tools soapysdr-module-rtlsdr");
+                eprintln!("  • Try running with sudo if you have permissions issues");
+                eprintln!("\nFor detailed device information, run:");
+                eprintln!("  airjedi --list-devices");
+                anyhow::bail!("No SDR devices available");
+            }
+
             // Load seify source
             let src = SourceBuilder::new()
                 .frequency(1090e6)
