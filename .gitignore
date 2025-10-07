@@ -8,6 +8,7 @@ Cargo.lock
 # IDE and editor files
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
@@ -50,3 +51,6 @@ pids
 # *.cf32
 # *.iq
 # samples/
+
+# Reference documentation
+reference/
