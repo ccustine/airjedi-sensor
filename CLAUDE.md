@@ -142,6 +142,60 @@ cargo run --release -- --file samples.cf32
 
 Input files should be Complex32 format at any sample rate ≥ 2 MHz.
 
+## Cross-Compilation for Raspberry Pi 5
+
+AirJedi can be cross-compiled for ARM64 targets like Raspberry Pi 5 running DietPi or Raspberry Pi OS using the native macOS toolchain.
+
+### Quick Build Script
+
+The easiest way to cross-compile:
+```bash
+./platform/debian/build-rpi5.sh
+```
+
+This script handles all the setup and builds the ARM64 binary automatically.
+
+### Manual Cross-Compilation
+
+```bash
+# One-time setup (install native ARM64 cross-compiler)
+brew tap messense/macos-cross-toolchains
+brew install aarch64-unknown-linux-gnu
+rustup target add aarch64-unknown-linux-gnu
+
+# Build for ARM64 using native toolchain (fast, no Docker required)
+cargo build --release --target aarch64-unknown-linux-gnu --no-default-features
+```
+
+**Note**: The `--no-default-features` flag is required because SoapySDR cannot be cross-compiled easily. The resulting binary will need SDR drivers installed on the target Raspberry Pi.
+
+**Benefits of Native Toolchain:**
+- ✅ Much faster builds (~35 seconds vs 2+ minutes)
+- ✅ No Docker/Colima overhead
+- ✅ Simpler setup
+- ✅ Direct control over compiler flags
+
+### Deployment
+
+See `platform/debian/DEPLOY_RPI5.md` for complete deployment instructions including:
+- Transferring binaries and files to Raspberry Pi
+- Installing runtime dependencies
+- Setting up systemd service
+- Performance optimization tips
+- Troubleshooting common issues
+
+### Building with SDR Support on Raspberry Pi
+
+For full SDR functionality, build natively on the Raspberry Pi:
+
+```bash
+# On the Raspberry Pi
+sudo apt-get install -y build-essential pkg-config soapysdr-tools libsoapysdr-dev
+cargo build --release
+```
+
+This approach provides full SoapySDR integration and better hardware compatibility.
+
 ## Output Formats
 
 AirJedi supports multiple output formats for compatibility with various ADS-B tools and applications:

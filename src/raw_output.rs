@@ -48,7 +48,7 @@ pub struct RawServer {
 impl RawServer {
     /// Create a new raw server listening on the specified port
     pub async fn new(port: u16, receiver: broadcast::Receiver<RawMessage>) -> Result<Self> {
-        let addr = format!("127.0.0.1:{}", port);
+        let addr = format!("0.0.0.0:{}", port);
         let listener = TcpListener::bind(&addr).await?;
         info!("Raw format server listening on {}", addr);
 

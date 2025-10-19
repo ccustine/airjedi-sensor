@@ -7,4 +7,9 @@ rustflags = [
     "-C", "target-cpu=native"
 ]
 
+# Cross-compilation target for Raspberry Pi 5 (ARM64)
+[target.aarch64-unknown-linux-gnu]
+# Native cross-compilation using Homebrew toolchain
+linker = "aarch64-unknown-linux-gnu-gcc"
+
 

@@ -16,10 +16,10 @@ name = "airjedi"
 path = "src/bin/airjedi.rs"
 
 [features]
-default = ["soapy"]
-aaronia_http = ["futuresdr/aaronia_http"]
-rtlsdr = ["futuresdr/rtlsdr"]
-soapy = ["futuresdr/soapy"]
+default = ["rtlsdr"]
+aaronia_http = ["futuresdr/aaronia_http", "futuresdr/seify"]
+rtlsdr = ["futuresdr/rtlsdr", "futuresdr/seify"]
+soapy = ["futuresdr/soapy", "futuresdr/seify"]
 
 [dependencies]
 adsb_deku = "0.7"
@@ -27,7 +27,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
-futuresdr = { version = "0.0.38", features = ["seify"] }
+futuresdr = { version = "0.0.38", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_with = "3"

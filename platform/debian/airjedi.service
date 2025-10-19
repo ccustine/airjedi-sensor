@@ -1,0 +1,39 @@
+[Unit]
+Description=AirJedi ADS-B Decoder Service
+Documentation=https://github.com/ccustine/airjedi
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/airjedi
+
+# Ensure the user has access to USB devices for RTL-SDR
+SupplementaryGroups=plugdev
+
+# Path to the airjedi binary
+ExecStart=/home/pi/airjedi/airjedi --sbs1 --websocket
+
+# Restart policy
+Restart=on-failure
+RestartSec=10s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=airjedi
+
+# Resource limits (optional - adjust as needed)
+# LimitNOFILE=65536
+# MemoryMax=512M
+
+# Security hardening (optional - uncomment if desired)
+# NoNewPrivileges=true
+# PrivateTmp=true
+# ProtectSystem=strict
+# ProtectHome=read-only
+# ReadWritePaths=/home/pi/airjedi
+
+[Install]
+WantedBy=multi-user.target

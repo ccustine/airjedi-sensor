@@ -323,7 +323,7 @@ pub struct Sbs1Server {
 impl Sbs1Server {
     /// Create a new SBS-1 server listening on the specified port
     pub async fn new(port: u16, receiver: broadcast::Receiver<Sbs1Message>) -> Result<Self> {
-        let addr = format!("127.0.0.1:{}", port);
+        let addr = format!("0.0.0.0:{}", port);
         let listener = TcpListener::bind(&addr).await?;
         info!("SBS-1 BaseStation server listening on {}", addr);
 

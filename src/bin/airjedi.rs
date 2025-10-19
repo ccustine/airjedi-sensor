@@ -126,6 +126,8 @@ fn sample_rate_parser(sample_rate_str: &str) -> Result<f64, String> {
 fn check_sdr_devices() -> bool {
     use std::process::Command;
 
+    println!("Checking for available SDR devices...");
+
     // Try using SoapySDRUtil to check for devices
     let output = Command::new("SoapySDRUtil")
         .arg("--find")
@@ -135,15 +137,66 @@ fn check_sdr_devices() -> bool {
         Ok(result) if result.status.success() => {
             let stdout = String::from_utf8_lossy(&result.stdout);
             // Check if we got actual device output (not empty, not "No devices found")
-            !stdout.trim().is_empty() && !stdout.contains("No devices found")
+            let has_devices = !stdout.trim().is_empty() && !stdout.contains("No devices found");
+
+            if has_devices {
+                println!("SoapySDRUtil found device(s):");
+                for line in stdout.lines() {
+                    if !line.trim().is_empty() {
+                        println!("  {}", line.trim());
+                    }
+                }
+            } else {
+                println!("SoapySDRUtil found no devices");
+            }
+
+            has_devices
         }
-        _ => {
+        Err(e) => {
+            println!("Could not run SoapySDRUtil: {}", e);
+            println!("Trying fallback method (rtl_test)...");
+
             // Fallback: try rtl_test
             let rtl_output = Command::new("rtl_test")
                 .arg("-t")
                 .output();
 
-            matches!(rtl_output, Ok(result) if result.status.success())
+            match rtl_output {
+                Ok(result) if result.status.success() => {
+                    println!("rtl_test found RTL-SDR device(s)");
+                    true
+                }
+                Ok(_) => {
+                    println!("rtl_test found no devices");
+                    false
+                }
+                Err(e) => {
+                    println!("Could not run rtl_test: {}", e);
+                    println!("Unable to check for devices - proceeding anyway");
+                    false
+                }
+            }
+        }
+        Ok(result) => {
+            // SoapySDRUtil ran but returned non-zero exit code
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            println!("SoapySDRUtil failed: {}", stderr);
+            println!("Trying fallback method (rtl_test)...");
+
+            let rtl_output = Command::new("rtl_test")
+                .arg("-t")
+                .output();
+
+            match rtl_output {
+                Ok(result) if result.status.success() => {
+                    println!("rtl_test found RTL-SDR device(s)");
+                    true
+                }
+                _ => {
+                    println!("No devices found via rtl_test either");
+                    false
+                }
+            }
         }
     }
 }
@@ -222,6 +275,36 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Log startup configuration and SDR backend availability
+    println!("AirJedi starting up...");
+
+    // Detect which SDR backends are compiled in
+    let mut backends = Vec::new();
+    if cfg!(feature = "soapy") {
+        backends.push("SoapySDR");
+    }
+    if cfg!(feature = "rtlsdr") {
+        backends.push("RTL-SDR");
+    }
+    if cfg!(feature = "aaronia_http") {
+        backends.push("Aaronia HTTP");
+    }
+
+    if backends.is_empty() {
+        println!("WARNING: No SDR backends compiled in! (built with --no-default-features)");
+        println!("         This binary cannot connect to SDR hardware.");
+        println!("         To fix this issue:");
+        println!("         1. Install SoapySDR on your system:");
+        println!("            - Raspberry Pi: sudo apt install soapysdr-tools libsoapysdr-dev");
+        println!("            - macOS: brew install soapysdr");
+        println!("         2. Rebuild the binary natively on this system:");
+        println!("            cargo build --release");
+        println!("         3. Or cross-compile with SDR features enabled (advanced)");
+        println!();
+    } else {
+        println!("Compiled SDR backends: {}", backends.join(", "));
+    }
+
     let mut fg = Flowgraph::new();
     futuresdr::runtime::init();
 
@@ -248,14 +331,66 @@ async fn main() -> Result<()> {
                 anyhow::bail!("No SDR devices available");
             }
 
+            // Log SourceBuilder configuration
+            println!("Configuring SDR source:");
+            println!("  Frequency: {:.2} MHz", 1090.0);
+            println!("  Sample rate: {:.2} MHz", args.sample_rate / 1e6);
+            println!("  Gain: {:.1} dB", args.gain);
+            if let Some(ref ant) = args.antenna {
+                println!("  Antenna: {}", ant);
+            }
+            if let Some(ref a) = args.args {
+                println!("  Args: {}", a);
+            }
+            println!();
+
             // Load seify source
-            let src = SourceBuilder::new()
+            println!("Attempting to connect to SDR device...");
+            let builder = SourceBuilder::new()
                 .frequency(1090e6)
                 .sample_rate(args.sample_rate)
                 .gain(args.gain)
-                .antenna(args.antenna)
-                .args(args.args)?
-                .build()?;
+                .antenna(args.antenna.clone())
+                .args(args.args.clone())?;
+
+            let src = match builder.build() {
+                Ok(source) => {
+                    println!("Successfully connected to SDR device!");
+                    source
+                }
+                Err(e) => {
+                    eprintln!("\nERROR: Failed to connect to SDR device!");
+                    eprintln!("Error details: {}", e);
+                    eprintln!();
+
+                    // Provide context-specific troubleshooting
+                    if backends.is_empty() {
+                        eprintln!("ROOT CAUSE: No SDR backends are compiled into this binary.");
+                        eprintln!("  This binary was built with --no-default-features,");
+                        eprintln!("  which excludes SoapySDR and other SDR driver support.");
+                        eprintln!();
+                        eprintln!("SOLUTION:");
+                        eprintln!("  1. Install SoapySDR and RTL-SDR drivers on this system:");
+                        eprintln!("     sudo apt install soapysdr-tools libsoapysdr-dev soapysdr-module-rtlsdr");
+                        eprintln!("  2. Rebuild the binary natively on this system:");
+                        eprintln!("     cargo build --release");
+                        eprintln!("     (This will automatically include SoapySDR support)");
+                        eprintln!();
+                        eprintln!("NOTE: The cross-compiled binary cannot access SDR hardware.");
+                        eprintln!("      You must rebuild natively for full SDR functionality.");
+                    } else {
+                        eprintln!("TROUBLESHOOTING:");
+                        eprintln!("  • Verify your SDR device is properly connected");
+                        eprintln!("  • Check USB connection and power");
+                        eprintln!("  • Try running: SoapySDRUtil --find");
+                        eprintln!("  • Check for permission issues (may need sudo)");
+                        eprintln!("  • Verify driver installation: SoapySDRUtil --info");
+                    }
+                    eprintln!();
+
+                    return Err(anyhow::anyhow!("Failed to connect to SDR device: {}", e));
+                }
+            };
 
             fg.add_block(src)?
         }
